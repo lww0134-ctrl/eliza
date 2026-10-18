@@ -1027,18 +1027,29 @@ ${tweet.text}`;
           // Check if this is a reply to an existing thread
           const previousThreadMemory =
             await this.runtime.getMemoryById(threadMemoryId);
+          const emitThreadEvent = (event: TwitterEventTypes) => {
+            const reportFailure = (error: unknown) =>
+              this.runtime.reportError(
+                "TwitterInteractionClient.emitThreadEvent",
+                error,
+                { event, tweetId: tweet.id },
+              );
+            try {
+              // error-policy:J7 The tweet memory is already stored. Thread
+              // listeners are observers, so report a rejected listener
+              // without leaving an unhandled rejection.
+              const emitted = this.runtime.emitEvent(event, threadPayload);
+              if (emitted) void emitted.catch(reportFailure);
+            } catch (error) {
+              reportFailure(error);
+            }
+          };
           if (previousThreadMemory) {
             // This is a reply to an existing thread
-            this.runtime.emitEvent(
-              TwitterEventTypes.THREAD_UPDATED,
-              threadPayload,
-            );
+            emitThreadEvent(TwitterEventTypes.THREAD_UPDATED);
           } else if ((tweet.thread[0]?.id ?? tweet.id) === tweet.id) {
             // This is the start of a new thread
-            this.runtime.emitEvent(
-              TwitterEventTypes.THREAD_CREATED,
-              threadPayload,
-            );
+            emitThreadEvent(TwitterEventTypes.THREAD_CREATED);
           }
         }
         this.assertCurrentSession(session);

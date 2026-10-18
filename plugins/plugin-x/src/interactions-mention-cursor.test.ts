@@ -15,7 +15,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClientBase } from "./base";
 import type { Tweet } from "./client";
 import { TwitterInteractionClient } from "./interactions";
-import type { TwitterClientState } from "./types";
+import { type TwitterClientState, TwitterEventTypes } from "./types";
 import { sendTweet } from "./utils";
 
 const PROFILE_ID = "bot-user";
@@ -254,5 +254,35 @@ describe("mention watermark vs. per-run engagement cap", () => {
     const recovered = await runPoll([...replied, 886], 875, replied, 2);
     expect(recovered.handled).toEqual([idAt(886)]);
     expect(recovered.watermark).toBe(BASE + 886n);
+  });
+
+  it("reports a rejected thread listener instead of leaving an unhandled rejection", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.emitEvent).mockRejectedValue(
+      new Error("thread listener failed"),
+    );
+    const client = createClient(runtime, vi.fn());
+    const interactions = new TwitterInteractionClient(
+      client,
+      runtime,
+      {} as TwitterClientState,
+    );
+    const mentionId = "1000000000000000600";
+    const threadTweet = mention({ id: mentionId });
+
+    await interactions.processMentionTweets([
+      mention({ id: mentionId, thread: [threadTweet] }),
+    ]);
+    // Flush the rejected listener promise before the assertion.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(runtime.reportError).toHaveBeenCalledWith(
+      "TwitterInteractionClient.emitThreadEvent",
+      expect.any(Error),
+      expect.objectContaining({
+        event: TwitterEventTypes.THREAD_CREATED,
+        tweetId: mentionId,
+      }),
+    );
   });
 });
