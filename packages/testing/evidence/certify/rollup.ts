@@ -12,7 +12,9 @@
  * drafts as `waived` carrying that reason (waived requires notes, so the
  * reason survives into the signed certification). An unparseable lane result
  * or analysis document is itself a failing finding — a broken reporter must
- * never read as a green lane.
+ * never read as a green lane. The same honesty applies to a lane whose counters
+ * are all zero: a runner that selected no test executed nothing, so the lane
+ * drafts as `fail` (or `waived` when the requirements mark it optional).
  *
  * Subject namespaces are fixed: `lane:<lane>` for lane results,
  * `analysis:<bundle path>` for failing analyses, and caller-chosen subjects
@@ -372,6 +374,34 @@ export function rollupBundle(
     }
     const { passed, failed, skipped } = parsed.data;
     const counts = `passed=${passed} failed=${failed} skipped=${skipped}`;
+    if (passed + failed + skipped === 0) {
+      // An all-zero lane executed nothing: the runner selected no test, so the
+      // lane proves nothing and cannot draft green. The Playwright requirement
+      // gate fails the same case ("executed zero tests"); an optional lane with
+      // a reason is waived like a skipped lane.
+      const reason = optionalLanes.get(lane);
+      const verdict = reason === undefined ? "fail" : "waived";
+      const note =
+        reason === undefined
+          ? "lane result reports no executed tests; a lane that ran nothing cannot pass"
+          : `${counts}; lane optional: ${reason}`;
+      lanes.push({
+        lane,
+        resultPath: artifact.path,
+        passed,
+        failed,
+        skipped,
+        verdict,
+        note,
+      });
+      verdicts.push({
+        subject: `lane:${lane}`,
+        verdict,
+        evidence: [artifact.path],
+        notes: note,
+      });
+      continue;
+    }
     if (failed > 0) {
       lanes.push({
         lane,

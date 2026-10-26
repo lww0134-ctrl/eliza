@@ -104,6 +104,20 @@ describe("rollupBundle", () => {
     expect(result.summary.counts).toEqual({ pass: 1, fail: 2, waived: 0 });
   });
 
+  it("fails a lane that executed zero tests instead of passing it", async () => {
+    const dir = await fixtureBundle({
+      "lanes/unit/result.json": {
+        content: JSON.stringify({ passed: 0, failed: 0, skipped: 0 }),
+        kind: "report",
+      },
+    });
+    const result = rollupBundle(dir);
+    const unit = subject(result.verdicts, "lane:unit");
+    expect(unit.verdict).toBe("fail");
+    expect(unit.notes).toContain("no executed tests");
+    expect(result.summary.counts).toEqual({ pass: 0, fail: 1, waived: 0 });
+  });
+
   it("waives skipped and absent lanes only when marked optional-with-reason", async () => {
     const dir = await fixtureBundle({
       "lanes/e2e/result.json": {
