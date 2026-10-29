@@ -130,9 +130,13 @@ function lookupError(
 
 /** Identity key for copies with exactly the same user-visible content. */
 function noteContentKey(note: StickyNote): string {
+  // The row id never takes part: copies created from the same content differ
+  // only by id, and a key that carried it made them read as different notes —
+  // the list showed one note twice and every text lookup refused them as
+  // ambiguous, though both rows carry the same title, body, color and format.
   return JSON.stringify(
     note.format
-      ? [note.id, note.title, note.body, note.color, note.format]
+      ? [note.title, note.body, note.color, note.format]
       : [note.title, note.body, note.color],
   );
 }

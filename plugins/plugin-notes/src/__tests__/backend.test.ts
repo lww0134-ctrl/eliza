@@ -1110,6 +1110,61 @@ describe("Notes capabilities", () => {
     expect(service.listNotes()).toEqual([]);
   });
 
+  it("treats identical copies of a formatted note as one note", async () => {
+    const service = await serviceFor(await temporaryStateFile());
+    const created = await interact(
+      "create-note",
+      {
+        content: "Groceries\nMilk",
+        color: "yellow",
+        format: { kind: "list", data: { items: [{ text: "Milk", done: false }] } },
+      },
+      service,
+    );
+    expect(created).toMatchObject({ success: true });
+    const [note] = service.listNotes();
+    if (!note) throw new Error("Created note is required");
+    // A rich note copied byte for byte (the duplicate-create case) is the same
+    // logical note, so a text lookup can address it and the list shows one row.
+    await service.store.transact((draft) => {
+      draft.notes.push({ ...note, id: "legacy-groceries-copy" });
+    });
+
+    const deleted = await interact(
+      "delete-note",
+      { query: "Groceries" },
+      service,
+    );
+    expect(deleted).toMatchObject({
+      success: true,
+      data: {
+        removedCount: 2,
+        removedIds: expect.arrayContaining([note.id, "legacy-groceries-copy"]),
+      },
+    });
+    expect(service.listNotes()).toEqual([]);
+  });
+
+  it("shows one row for byte-identical copies of a formatted note", async () => {
+    const service = await serviceFor(await temporaryStateFile());
+    await interact(
+      "create-note",
+      {
+        content: "Groceries\nMilk",
+        color: "yellow",
+        format: { kind: "list", data: { items: [{ text: "Milk", done: false }] } },
+      },
+      service,
+    );
+    const [note] = service.listNotes();
+    if (!note) throw new Error("Created note is required");
+    await service.store.transact((draft) => {
+      draft.notes.push({ ...note, id: "legacy-groceries-copy" });
+    });
+    expect(service.listNotes()).toHaveLength(1);
+    expect(service.listNotes()[0]?.id).toBe(note.id);
+  });
+
   it("requires structural confirmation before clear-notes mutates the collection", async () => {
     const service = await serviceFor(await temporaryStateFile());
     await interact(
