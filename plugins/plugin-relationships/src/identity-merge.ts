@@ -194,7 +194,15 @@ export function mergeEntities(args: {
   let identities = [...args.target.identities];
   const tags = new Set(args.target.tags);
   const attributes = { ...(args.target.attributes ?? {}) };
-  const seenLastObserved: string[] = [args.target.state.lastObservedAt ?? ""];
+  // `lastInteractionPlatform` names the platform of the `lastObservedAt`
+  // instant (`recordInteraction` writes the pair together), so the merged
+  // entity must take both from the same record: the newest one.
+  const observations: Array<{ at: string; platform?: string }> = [
+    {
+      at: args.target.state.lastObservedAt ?? "",
+      platform: args.target.state.lastInteractionPlatform,
+    },
+  ];
   const seenLastInbound: string[] = [args.target.state.lastInboundAt ?? ""];
   const seenLastOutbound: string[] = [args.target.state.lastOutboundAt ?? ""];
 
@@ -220,7 +228,10 @@ export function mergeEntities(args: {
       }
     }
     if (source.state.lastObservedAt) {
-      seenLastObserved.push(source.state.lastObservedAt);
+      observations.push({
+        at: source.state.lastObservedAt,
+        platform: source.state.lastInteractionPlatform,
+      });
     }
     if (source.state.lastInboundAt) {
       seenLastInbound.push(source.state.lastInboundAt);
@@ -235,6 +246,14 @@ export function mergeEntities(args: {
     if (filtered.length === 0) return undefined;
     return filtered.reduce((acc, cur) => (cur > acc ? cur : acc));
   };
+  // The target's own observation wins a tie, as before: it is first in the list
+  // and `reduce` keeps the first maximum.
+  const latestObservation = observations
+    .filter((observation) => observation.at.length > 0)
+    .reduce<{ at: string; platform?: string } | undefined>(
+      (acc, cur) => (acc === undefined || cur.at > acc.at ? cur : acc),
+      undefined,
+    );
 
   return {
     ...args.target,
@@ -244,8 +263,9 @@ export function mergeEntities(args: {
       Object.keys(attributes).length > 0 ? attributes : args.target.attributes,
     state: {
       ...args.target.state,
-      ...(pickLatest(seenLastObserved)
-        ? { lastObservedAt: pickLatest(seenLastObserved) }
+      ...(latestObservation ? { lastObservedAt: latestObservation.at } : {}),
+      ...(latestObservation?.platform
+        ? { lastInteractionPlatform: latestObservation.platform }
         : {}),
       ...(pickLatest(seenLastInbound)
         ? { lastInboundAt: pickLatest(seenLastInbound) }

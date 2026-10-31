@@ -1273,6 +1273,38 @@ describe("EntityStore", () => {
       },
     ]);
   });
+  it("takes the platform of the newest interaction when a merge folds a later source", async () => {
+    const { store } = createHarness();
+    await store.upsert({
+      entityId: "ent-discord",
+      type: "person",
+      preferredName: "Dana",
+      identities: [identity({ platform: "discord", handle: "dana#1" })],
+      tags: [],
+      visibility: "owner_agent_admin",
+      state: {
+        lastObservedAt: T0,
+        lastInboundAt: T0,
+        lastInteractionPlatform: "discord",
+      },
+    });
+    await store.upsert({
+      entityId: "ent-telegram",
+      type: "person",
+      preferredName: "Dana",
+      identities: [identity({ platform: "telegram", handle: "@dana" })],
+      tags: [],
+      visibility: "owner_agent_admin",
+      state: {
+        lastObservedAt: T2,
+        lastInboundAt: T1,
+        lastInteractionPlatform: "telegram",
+      },
+    });
+    const merged = await store.merge("ent-discord", ["ent-telegram"]);
+    expect(merged.state.lastObservedAt).toBe(T2);
+    expect(merged.state.lastInteractionPlatform).toBe("telegram");
+  });
   it("refuses to delete the self entity and no-ops delete of a missing id", async () => {
     const { store } = createHarness();
     await store.ensureSelf();
