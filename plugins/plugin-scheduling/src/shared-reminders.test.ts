@@ -195,3 +195,93 @@ it("keeps an interval reminder's next time when only its text changes", async ()
     occurrenceAtIso: "2026-10-11T12:00:00.000Z",
   });
 });
+
+it("creates the reminder when a contrast clause releases the earlier negation", async () => {
+  const agentId = "33333333-3333-4333-8333-333333333333";
+  const runtime = {
+    agentId,
+    getService: () => null,
+    reportError: () => undefined,
+  } as unknown as IAgentRuntime;
+  const service = await ScheduledTaskRunnerService.start(runtime);
+  const now = () => new Date("2026-10-11T12:00:00Z");
+  const runner = service.getRunner({ agentId, now });
+  const action = createSharedRemindersEdgeAction({
+    runner,
+    agentId,
+    now,
+    delivery: {
+      platform: "telegram",
+      project: "test",
+      connectorAccountId: "owner",
+      chatId: "123456",
+    },
+  });
+  try {
+    const commands = [
+      {
+        text: "I don't need a reminder for the standup, but remind me to call mom in 30 minutes",
+        reminderText: "Call mom",
+      },
+      {
+        text: "Don't set a reminder for the standup, but remind me to water the plants in 30 minutes",
+        reminderText: "Water the plants",
+      },
+    ];
+    for (const [index, command] of commands.entries()) {
+      const result = await action.handler(
+        runtime,
+        {
+          id: crypto.randomUUID(),
+          entityId: agentId,
+          agentId,
+          roomId: agentId,
+          content: { text: command.text, source: "test" },
+        } as Memory,
+        undefined,
+        // A model-supplied delay that must not win over the explicit one.
+        {
+          parameters: {
+            operation: "create",
+            reminderText: command.reminderText,
+            inMinutes: 90,
+          },
+        },
+      );
+      expect(result?.success, JSON.stringify(result)).toBe(true);
+      const tasks = await runner.list();
+      expect(tasks).toHaveLength(index + 1);
+      expect(tasks[index].trigger).toMatchObject({
+        kind: "once",
+        atIso: "2026-10-11T12:30:00.000Z",
+      });
+    }
+
+    // A negation in the same clause as the delay still refuses the command.
+    const refused = await action.handler(
+      runtime,
+      {
+        id: crypto.randomUUID(),
+        entityId: agentId,
+        agentId,
+        roomId: agentId,
+        content: {
+          text: "I don't want a reminder in 5 minutes",
+          source: "test",
+        },
+      } as Memory,
+      undefined,
+      {
+        parameters: {
+          operation: "create",
+          reminderText: "Call dad",
+          inMinutes: 90,
+        },
+      },
+    );
+    expect(refused?.success, JSON.stringify(refused)).toBe(false);
+    expect(await runner.list()).toHaveLength(commands.length);
+  } finally {
+    await service.stop();
+  }
+});

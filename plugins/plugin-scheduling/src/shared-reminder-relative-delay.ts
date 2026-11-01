@@ -188,7 +188,12 @@ function hasNegatedBareReminderDelay(text: string): boolean {
   for (const match of text.matchAll(BARE_REMINDER_DELAY_PATTERN)) {
     if (
       match.index !== undefined &&
-      prefixNegatesCommand(currentClausePrefix(text, match.index))
+      // The negation only governs its own clause. The matched delay is at the end of
+      // match[0], so evaluate there: "I don't need a reminder, but remind me in 5
+      // minutes" resets at "but", and the delay in the second clause is not negated.
+      prefixNegatesCommand(
+        currentClausePrefix(text, match.index + match[0].length),
+      )
     ) {
       return true;
     }
@@ -336,7 +341,11 @@ function collectCandidates(text: string): DelayCandidate[] {
             unit: rawUnit as keyof typeof UNIT_MILLISECONDS,
           },
         ],
-        negated: candidateIsNegated(text, match.index),
+        // The negation must sit in the same clause as the matched command and its
+        // delay, which both end at match[0]'s last character. A contrast clause in
+        // between ("don't set a reminder for X, but remind me to Y in 30 minutes")
+        // therefore releases the negation instead of rejecting the whole command.
+        negated: candidateIsNegated(text, match.index + match[0].length),
         invalidComposition: false,
       });
     }
