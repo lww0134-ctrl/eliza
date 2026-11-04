@@ -238,6 +238,28 @@ export function summarizeResourceRun(run, opts = {}) {
 }
 
 /**
+ * Generation rows that were recorded after the `before` snapshot.
+ *
+ * The dev endpoint serves a bounded window (the newest `limit` rows of a capped
+ * per-bridge ring buffer), so the returned list stops growing once a long-lived
+ * agent fills it. A difference in list length then reports zero new generations
+ * for every later workload. Each row carries the bridge's monotonic `sequence`,
+ * so attribute by that value instead of by list position.
+ */
+export function newGenerationsSince(before, after) {
+  if (before.length === 0) return after;
+  const last = before[before.length - 1].sequence;
+  if (!Number.isSafeInteger(last))
+    throw new Error(
+      "The paired agent reports no generation sequence. Update its build before measuring.",
+    );
+  return after.filter(
+    (generation) =>
+      Number.isSafeInteger(generation.sequence) && generation.sequence > last,
+  );
+}
+
+/**
  * Check a summary against a tier budget. Each budget key declares a direction:
  *   - `min` budgets (throughput floors): value must be >= budget,
  *   - `max` budgets (latency / memory / battery ceilings): value must be <= budget.

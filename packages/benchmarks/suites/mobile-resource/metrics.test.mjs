@@ -16,6 +16,7 @@ import {
 import {
   checkBudgets,
   computeThroughput,
+  newGenerationsSince,
   summarizeResourceRun,
 } from "./metrics.mjs";
 
@@ -328,5 +329,26 @@ test("lab-artifacts reports coverage gaps instead of fabricating missing evidenc
     summary.gaps.includes(
       "ios|ios-phone|eliza-1-2b|chat observed charging during a lab run",
     ),
+  );
+});
+
+test("new generations are attributed by sequence after the window fills", () => {
+  const row = (sequence) => ({ sequence, outputTokens: sequence });
+  // The bridge keeps the newest 200 rows, so a busy workload replaces old rows
+  // instead of extending the list.
+  const before = Array.from({ length: 200 }, (_, i) => row(i));
+  const after = [...before.slice(2), row(200), row(201)];
+  assert.equal(after.length, before.length);
+  assert.deepEqual(
+    newGenerationsSince(before, after).map((generation) => generation.sequence),
+    [200, 201],
+  );
+  // A quiet window has nothing new, and a cold bridge has no window to diff.
+  assert.deepEqual(newGenerationsSince(before, before), []);
+  assert.equal(newGenerationsSince([], before).length, 200);
+  // Rows from a build without a sequence cannot be attributed; refuse loudly.
+  assert.throws(
+    () => newGenerationsSince([row(undefined)], [row(1)]),
+    /no generation sequence/,
   );
 });

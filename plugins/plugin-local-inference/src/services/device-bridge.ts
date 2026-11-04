@@ -331,6 +331,12 @@ interface PersistedGenerateRequest {
  * throughput fields are `null` when the device could not measure the inputs.
  */
 export interface DeviceGenerationMetrics {
+	/**
+	 * Monotonic per-bridge sequence of this row. The retention window is bounded,
+	 * so a consumer that reads the dev endpoint twice attributes new rows by this
+	 * value, not by their offset in the returned list.
+	 */
+	sequence: number;
 	deviceId: string;
 	platform: DeviceCapabilities["platform"] | null;
 	/** Device model identifier (e.g. `iPhone17,2`) for per-device baselines. */
@@ -399,6 +405,8 @@ export class DeviceBridge {
 	private lastGenerationMetrics: DeviceGenerationMetrics | null = null;
 	/** Bounded ring buffer of recent generation metrics for the dev endpoint. */
 	private readonly recentGenerations: DeviceGenerationMetrics[] = [];
+	/** Next `sequence` handed to a recorded generation; monotonic per bridge. */
+	private nextGenerationSequence = 0;
 	private static readonly RECENT_GENERATIONS_CAP = 200;
 	private readonly expectedPairingToken: string | null =
 		process.env.ELIZA_DEVICE_PAIRING_TOKEN?.trim() || null;
@@ -484,15 +492,21 @@ export class DeviceBridge {
 		const n = Math.max(0, Math.trunc(limit));
 		return this.recentGenerations.slice(-n);
 	}
-	private emitGenerationMetrics(metrics: DeviceGenerationMetrics): void {
-		this.lastGenerationMetrics = metrics;
-		this.recentGenerations.push(metrics);
+	private emitGenerationMetrics(
+		metrics: Omit<DeviceGenerationMetrics, "sequence">,
+	): void {
+		const recorded: DeviceGenerationMetrics = {
+			...metrics,
+			sequence: this.nextGenerationSequence++,
+		};
+		this.lastGenerationMetrics = recorded;
+		this.recentGenerations.push(recorded);
 		if (this.recentGenerations.length > DeviceBridge.RECENT_GENERATIONS_CAP) {
 			this.recentGenerations.shift();
 		}
 		for (const listener of this.generationMetricsListeners) {
 			try {
-				listener(metrics);
+				listener(recorded);
 			} catch {
 				this.generationMetricsListeners.delete(listener);
 			}

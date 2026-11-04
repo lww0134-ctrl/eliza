@@ -40,7 +40,11 @@ import {
   sleep,
   tps,
 } from "./lib.mjs";
-import { checkBudgets, summarizeResourceRun } from "./metrics.mjs";
+import {
+  checkBudgets,
+  newGenerationsSince,
+  summarizeResourceRun,
+} from "./metrics.mjs";
 import { DEFAULT_WORKLOAD_IDS, workloadById } from "./workloads.mjs";
 
 const NOW = new Date().toISOString();
@@ -147,7 +151,6 @@ async function runWorkload(workload, ctx) {
   const samples = [];
 
   const before = (await fetchGenerationMetrics(args.baseUrl)) ?? [];
-  const beforeCount = before.length;
 
   if (target.platform === "android" && target.device) {
     resetAndroidBatteryStats(target.device);
@@ -175,7 +178,7 @@ async function runWorkload(workload, ctx) {
   }
 
   const after = (await fetchGenerationMetrics(args.baseUrl)) ?? [];
-  const newGenerations = after.slice(beforeCount).map((g) => ({
+  const newGenerations = newGenerationsSince(before, after).map((g) => ({
     promptTokens: g.promptTokens,
     outputTokens: g.outputTokens,
     durationMs: g.durationMs,
