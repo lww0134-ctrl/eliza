@@ -24,6 +24,7 @@ import * as firstLineCache from "@elizaos/cloud-shared/lib/services/tts-first-li
 import { logger } from "@elizaos/cloud-shared/lib/utils/logger";
 import { generateDrizzleJson, generateMigration } from "drizzle-kit/api";
 import { Hono } from "hono";
+import { validRequestId } from "../src/inference-admission-gate";
 import * as generativeRouteAuth from "../src/lib/generative-route-auth";
 
 const phaseRows: Array<Record<string, unknown>> = [];
@@ -43,8 +44,18 @@ const providerCalls: string[] = [];
 const providerFailures = new Map<string, Error>();
 const COST_PER_CHAR = 0.001;
 
+const { admitFlatGenerativeOperation } = generativeRouteAuth;
+/** Request ids the route asked the Worker admission gate to lease. */
+const admissionRequestIds: string[] = [];
+
 mock.module("@/api-app/lib/generative-route-auth", () => ({
   ...generativeRouteAuth,
+  admitFlatGenerativeOperation: (
+    params: Parameters<typeof admitFlatGenerativeOperation>[0],
+  ) => {
+    admissionRequestIds.push(params.context.requestId);
+    return admitFlatGenerativeOperation(params);
+  },
   requireGenerativeRouteCaller: async () => {
     authCalls++;
     return {
@@ -297,6 +308,33 @@ test("speech timing preserves TTS provider and charged amount", async () => {
   expect(authCalls - auth).toBe(1);
   expect(providerCalls.length - calls).toBe(1);
   expect(await balance()).toBeCloseTo(before - text.length * COST_PER_CHAR, 6);
+});
+
+test("a UUID Idempotency-Key yields an admission request id the gate accepts", async () => {
+  admissionRequestIds.length = 0;
+  await speak("Your table is booked for eight.", randomUUID());
+  const requestId = admissionRequestIds[0];
+  expect(requestId).toBeDefined();
+  // The Worker replays a keyed request by this id, so the admission gate must
+  // accept it: at most 128 characters from [A-Za-z0-9._:-]. The SDK sends a
+  // UUID Idempotency-Key, and it is the shape the app uses for every call.
+  expect(requestId.length).toBeLessThanOrEqual(128);
+  expect(validRequestId(requestId)).toBe(true);
+
+  // A short key keeps the id it always had, so a request completed before this
+  // change still replays under the same id instead of being charged again.
+  const shortKey = `k-${randomUUID().slice(0, 8)}`;
+  admissionRequestIds.length = 0;
+  await speak("Your table is booked for nine.", shortKey);
+  await speak("Your table is booked for nine.", shortKey);
+  expect(admissionRequestIds).toHaveLength(2);
+  expect(
+    admissionRequestIds[0].startsWith(`voice-tts:${orgId}:${shortKey}:`),
+  ).toBe(true);
+  expect(admissionRequestIds[1]).toBe(admissionRequestIds[0]);
+  // Another utterance under the same key is a different paid request.
+  await speak("Your table is booked for ten.", shortKey);
+  expect(admissionRequestIds[2]).not.toBe(admissionRequestIds[0]);
 });
 
 test("malformed TTS JSON retains auth policy and never calls a provider", async () => {
