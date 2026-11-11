@@ -210,6 +210,11 @@ function sanitizeSpeechPunctuation(input: string): string {
 	text = text.replace(/[‘’]/g, "'");
 	text = text.replace(/[…]/g, "...");
 	text = text.replace(/[–—]/g, ", ");
+	// NFKC renders a vulgar fraction (`½`, `⅓`) as digits around U+2044
+	// FRACTION SLASH. The speech whitelist below keeps the ASCII solidus, so
+	// map the fraction and division slashes onto it first: dropping them turns
+	// one quantity into two spoken numbers ("½ cup" becomes "1 2 cup").
+	text = text.replace(/[\u2044\u2215]/g, "/");
 	// Collapse repeated punctuation BEFORE the spacing rules separate the
 	// repeats ("Wait!!!" must speak as "Wait!", not "Wait! ! !").
 	text = text.replace(/([,.!?，。！？])\1+/g, "$1");
